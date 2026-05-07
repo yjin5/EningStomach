@@ -144,6 +144,8 @@ def init_db():
                     notes       TEXT
                 )
             """)
+            # PG column migrations
+            cur.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS opening_hours TEXT")
         else:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS restaurants (
