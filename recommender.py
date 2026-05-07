@@ -164,7 +164,7 @@ _EXERCISES = [
     ("普拉提", 4),
 ]
 
-_CALORIE_ESTIMATE = {1: 300, 2: 550, 3: 800}
+_CALORIE_ESTIMATE = {0: 100, 1: 300, 2: 550, 3: 800}
 
 _CUTE_TEMPLATES = [
     "吃完记得动一动哦～ 相当于{ex1}约 {t1} 分钟，或者{ex2}约 {t2} 分钟呢！",

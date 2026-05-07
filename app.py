@@ -341,8 +341,8 @@ elif page == "导入菜单":
                 with col1:
                     name = st.text_input("菜名", value=d["name"], key=f"name_{i}")
                     price = st.number_input("价格 ($)", value=float(d["price"] or 0), min_value=0.0, step=0.5, key=f"price_{i}")
-                    calorie_level = st.select_slider("热量", [1,2,3],
-                        format_func=lambda x: {1:"低",2:"中",3:"高"}[x],
+                    calorie_level = st.select_slider("热量", [0,1,2,3],
+                        format_func=lambda x: {0:"极低",1:"低",2:"中",3:"高"}[x],
                         value=int(d.get("calorie_level",2)), key=f"cal_{i}")
                     sodium_level = st.select_slider("钠含量", [1,2,3],
                         format_func=lambda x: {1:"低",2:"中",3:"高"}[x],
@@ -397,8 +397,8 @@ elif page == "添加菜品":
         col1, col2 = st.columns(2)
         with col1:
             calorie_level = st.select_slider(
-                "热量", options=[1, 2, 3],
-                format_func=lambda x: {1: "低 (<400kcal)", 2: "中 (400-700)", 3: "高 (>700)"}[x],
+                "热量", options=[0, 1, 2, 3],
+                format_func=lambda x: {0: "极低 (<150kcal)", 1: "低 (150-400)", 2: "中 (400-700)", 3: "高 (>700)"}[x],
                 value=2,
             )
             sodium_level = st.select_slider(

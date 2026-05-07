@@ -296,7 +296,7 @@ def get_restaurant(restaurant_id):
 
 def compute_health_score(calorie_level, sodium_level, veggie_content, protein_type, is_indulgent):
     score = 5.0
-    score -= (calorie_level - 1) * 0.8
+    score -= max(calorie_level - 1, 0) * 0.8  # level 0 gets no penalty
     score -= (sodium_level - 1) * 0.8
     score += (veggie_content - 1) * 0.4
     protein_bonus = {
