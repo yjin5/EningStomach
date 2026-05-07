@@ -162,6 +162,9 @@ T = {
         "order_website":    "去餐厅官网点餐",
         "log_order_btn":    "记录已点",
         "order_logged":     "已记录 {n} 道菜！",
+        # Rating + favorites
+        "min_rating":       "最低评分（0 = 不限）",
+        "favorites_first":  "优先推荐收藏菜",
         # Sidebar
         "api_ok":           "Google Maps API: 已连接",
         "api_missing":      "Google Maps API: 未配置\n在 .env 填入 GOOGLE_PLACES_API_KEY",
@@ -320,6 +323,9 @@ T = {
         "order_website":    "Order at restaurant website",
         "log_order_btn":    "Log order",
         "order_logged":     "Logged {n} dishes!",
+        # Rating + favorites
+        "min_rating":       "Min rating (0 = any)",
+        "favorites_first":  "Boost favorites",
         "api_ok":           "Google Maps API: Connected",
         "api_missing":      "Google Maps API: Not configured\nAdd GOOGLE_PLACES_API_KEY to .env",
     },

@@ -132,7 +132,8 @@ def init_db():
                     health_score    REAL DEFAULT 3.0,
                     yelp_mentions   TEXT,
                     notes           TEXT,
-                    active          INTEGER DEFAULT 1
+                    active          INTEGER DEFAULT 1,
+                    is_favorite     INTEGER DEFAULT 0
                 )
             """)
             cur.execute("""
@@ -146,6 +147,7 @@ def init_db():
             """)
             # PG column migrations
             cur.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS opening_hours TEXT")
+            cur.execute("ALTER TABLE dishes ADD COLUMN IF NOT EXISTS is_favorite INTEGER DEFAULT 0")
         else:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS restaurants (
@@ -174,7 +176,8 @@ def init_db():
                     health_score    REAL DEFAULT 3.0,
                     yelp_mentions   TEXT,
                     notes           TEXT,
-                    active          INTEGER DEFAULT 1
+                    active          INTEGER DEFAULT 1,
+                    is_favorite     INTEGER DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS eat_history (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,6 +195,8 @@ def init_db():
                                  (guess_category(row["cuisine"] or ""), row["id"]))
             if not _col_exists(conn, "restaurants", "opening_hours"):
                 conn.execute("ALTER TABLE restaurants ADD COLUMN opening_hours TEXT")
+            if not _col_exists(conn, "dishes", "is_favorite"):
+                conn.execute("ALTER TABLE dishes ADD COLUMN is_favorite INTEGER DEFAULT 0")
 
 
 # ── Hours helpers ─────────────────────────────────────────────────────────────
@@ -378,6 +383,12 @@ def deactivate_dish(dish_id):
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute(f"UPDATE dishes SET active=0 WHERE id={PH}", (dish_id,))
+
+
+def toggle_favorite(dish_id, value: bool):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE dishes SET is_favorite={PH} WHERE id={PH}", (int(value), dish_id))
 
 
 # ── Eat history ───────────────────────────────────────────────────────────────

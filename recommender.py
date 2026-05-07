@@ -39,6 +39,8 @@ def recommend(
     top_n: int = 3,
     required_protein_types=None,
     exclude_shown_ids=None,
+    min_rating: float = 0.0,
+    boost_favorites: bool = False,
 ) -> list[dict]:
     """
     Return up to top_n recommended dishes as dicts, ranked by composite score.
@@ -88,6 +90,10 @@ def recommend(
         if any(kw in mentions or kw in notes for kw in exclude_keywords):
             continue
 
+        # Rating filter — skip only if rated AND below threshold
+        if min_rating and d.get("yelp_rating") and d["yelp_rating"] < min_rating:
+            continue
+
         # Compute component scores (all 0-1)
         s_health = (d["health_score"] - 1) / 4          # health_score 1-5 → 0-1
         s_yelp   = d["yelp_rating"] / 5.0 if d["yelp_rating"] else 0.5
@@ -100,6 +106,10 @@ def recommend(
             w_price   * s_price  +
             w_novelty * s_novelty
         )
+        # Favorite boost
+        if boost_favorites and d.get("is_favorite"):
+            composite += 0.20
+
         # Add small random jitter so it's not always the same top result
         composite += random.uniform(0, 0.05)
 

@@ -1,7 +1,7 @@
 import streamlit as st
 from database import (
     init_db, add_restaurant, get_restaurants, get_restaurant,
-    add_dish, add_dishes_bulk, get_dishes, deactivate_dish, update_dish_protein_type,
+    add_dish, add_dishes_bulk, get_dishes, deactivate_dish, toggle_favorite, update_dish_protein_type,
     log_meal, get_history, get_history_by_date, delete_meal, delete_meals_by_date,
     get_recent_indulgence_score, update_restaurant_yelp, update_restaurant_hours,
     today_hours, CUISINE_CATEGORIES,
@@ -67,8 +67,13 @@ if _page_key == "recommend":
             options=["spicy", "salty", "greasy", "oily", "heavy", "sweet", "rich"],
         )
 
-    max_price = st.slider(t("max_price", _lang), 0, 100, 30)
-    prefer_healthy = st.checkbox(t("prefer_healthy", _lang), value=(indulgence >= 0.4))
+    max_price  = st.slider(t("max_price", _lang), 0, 100, 30)
+    min_rating = st.slider(t("min_rating", _lang), 0.0, 5.0, 0.0, step=0.5)
+    col_h, col_f = st.columns(2)
+    with col_h:
+        prefer_healthy = st.checkbox(t("prefer_healthy", _lang), value=(indulgence >= 0.4))
+    with col_f:
+        boost_favorites = st.checkbox(t("favorites_first", _lang))
 
     _MEAT_OPTIONS = {
         "poultry": t("poultry", _lang),
@@ -88,7 +93,7 @@ if _page_key == "recommend":
         exclude_ids = [rest_names[n] for n in exclude_rests]
 
         shown = st.session_state.get("shown_dish_ids", set())
-        results = recommend(
+        _rec_kwargs = dict(
             cuisine_categories=selected_cats if selected_cats else None,
             exclude_restaurant_ids=exclude_ids,
             exclude_keywords=exclude_kws,
@@ -96,20 +101,14 @@ if _page_key == "recommend":
             prefer_healthy=prefer_healthy,
             top_n=3,
             required_protein_types=required_meats if required_meats else None,
-            exclude_shown_ids=shown,
+            min_rating=min_rating if min_rating > 0 else 0.0,
+            boost_favorites=boost_favorites,
         )
+        results = recommend(**_rec_kwargs, exclude_shown_ids=shown)
         if not results:
             shown = set()
             st.session_state["shown_dish_ids"] = set()
-            results = recommend(
-                cuisine_categories=selected_cats if selected_cats else None,
-                exclude_restaurant_ids=exclude_ids,
-                exclude_keywords=exclude_kws,
-                max_price=max_price if max_price > 0 else None,
-                prefer_healthy=prefer_healthy,
-                top_n=3,
-                required_protein_types=required_meats if required_meats else None,
-            )
+            results = recommend(**_rec_kwargs)
 
         if not results:
             st.warning(t("no_results", _lang))
@@ -545,7 +544,7 @@ elif _page_key == "manage":
         for d in dishes:
             health_bar = "🟢" * int(d["health_score"]) + "⚪" * (5 - int(d["health_score"]))
             price_str  = f"${d['price']:.2f}" if d["price"] else "?"
-            col_check, col_info, col_btn = st.columns([1, 5, 1])
+            col_check, col_info, col_fav, col_btn = st.columns([1, 5, 1, 1])
             with col_check:
                 checked = st.checkbox("sel", key=f"sel_{d['id']}", label_visibility="collapsed")
                 if checked:
@@ -569,6 +568,11 @@ elif _page_key == "manage":
                     update_dish_protein_type(d["id"], new_pt)
                     st.rerun()
                 st.caption(t("kcal_hint", _lang, kcal=kcal, ex=ex_name, mins=ex_mins))
+            with col_fav:
+                is_fav = bool(d.get("is_favorite"))
+                if st.button("★" if is_fav else "☆", key=f"fav_{d['id']}"):
+                    toggle_favorite(d["id"], not is_fav)
+                    st.rerun()
             with col_btn:
                 if st.button(t("remove_btn", _lang), key=f"del_{d['id']}"):
                     deactivate_dish(d["id"])
