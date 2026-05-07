@@ -2,6 +2,7 @@
 Google Places API integration.
 Fetches restaurant info, ratings, review snippets, and website for Houston area.
 """
+import base64
 import requests
 from config import GOOGLE_PLACES_API_KEY
 
@@ -47,7 +48,7 @@ def get_place_details(place_id: str) -> dict:
         f"{PLACES_BASE}/details/json",
         params={
             "place_id": place_id,
-            "fields": "website,reviews,url",
+            "fields": "website,reviews,url,opening_hours",
             "key": GOOGLE_PLACES_API_KEY,
         },
         timeout=10,
@@ -99,6 +100,35 @@ def get_place_photos(place_id: str, max_photos: int = 10) -> list[bytes]:
     return images
 
 
+def is_menu_photo(image_bytes: bytes) -> bool:
+    """Return True if the image looks like a restaurant menu."""
+    from config import GROQ_API_KEY
+    if not GROQ_API_KEY:
+        return False
+    from groq import Groq
+    client = Groq(api_key=GROQ_API_KEY)
+    b64 = base64.b64encode(image_bytes).decode()
+    try:
+        resp = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": (
+                        "Look at this image carefully. Is it a restaurant menu page showing "
+                        "dish names and prices? Answer only YES or NO."
+                    )},
+                ],
+            }],
+            max_tokens=5,
+        )
+        answer = resp.choices[0].message.content.strip().upper()
+        return "YES" in answer
+    except Exception:
+        return False
+
+
 def enrich_restaurant(name: str, address: str = ""):
     """
     One-shot: search + fetch details + reviews.
@@ -112,4 +142,6 @@ def enrich_restaurant(name: str, address: str = ""):
     info["website"] = details.get("website") or details.get("url", "")
     info["keywords"] = extract_keywords(reviews)
     info["review_snippets"] = [r.get("text", "")[:200] for r in reviews[:3]]
+    hours = details.get("opening_hours", {})
+    info["opening_hours"] = hours.get("weekday_text")  # list of strings or None
     return info

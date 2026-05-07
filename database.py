@@ -1,5 +1,7 @@
+import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from config import DATABASE_URL
 
@@ -13,7 +15,7 @@ if USE_PG:
 
     @contextmanager
     def get_conn():
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor, connect_timeout=10)
         try:
             yield conn
             conn.commit()
@@ -112,6 +114,7 @@ def init_db():
                     yelp_id          TEXT,
                     yelp_rating      REAL DEFAULT 0,
                     yelp_review_count INTEGER DEFAULT 0,
+                    opening_hours    TEXT,
                     created_at       DATE DEFAULT CURRENT_DATE
                 )
             """)
@@ -153,6 +156,7 @@ def init_db():
                     yelp_id          TEXT,
                     yelp_rating      REAL DEFAULT 0,
                     yelp_review_count INTEGER DEFAULT 0,
+                    opening_hours    TEXT,
                     created_at       TEXT DEFAULT (date('now'))
                 );
                 CREATE TABLE IF NOT EXISTS dishes (
@@ -178,18 +182,52 @@ def init_db():
                     notes       TEXT
                 );
             """)
-            # SQLite migration
+            # SQLite migrations
             if not _col_exists(conn, "restaurants", "cuisine_category"):
                 conn.execute("ALTER TABLE restaurants ADD COLUMN cuisine_category TEXT DEFAULT '其他'")
                 for row in _rows(conn.execute("SELECT id, cuisine FROM restaurants").fetchall()):
                     conn.execute("UPDATE restaurants SET cuisine_category=? WHERE id=?",
                                  (guess_category(row["cuisine"] or ""), row["id"]))
+            if not _col_exists(conn, "restaurants", "opening_hours"):
+                conn.execute("ALTER TABLE restaurants ADD COLUMN opening_hours TEXT")
+
+
+# ── Hours helpers ─────────────────────────────────────────────────────────────
+
+def is_open_today(opening_hours_json) -> bool:
+    """Return True if the restaurant is open today (or hours unknown)."""
+    if not opening_hours_json:
+        return True
+    try:
+        weekday_text = json.loads(opening_hours_json)
+        today = date.today().strftime("%A")  # e.g. "Tuesday"
+        for entry in weekday_text:
+            if entry.startswith(today):
+                return "Closed" not in entry
+    except Exception:
+        pass
+    return True
+
+
+def today_hours(opening_hours_json) -> str:
+    """Return today's hours string, e.g. '11:00 AM – 9:00 PM', or '' if unknown."""
+    if not opening_hours_json:
+        return ""
+    try:
+        weekday_text = json.loads(opening_hours_json)
+        today = date.today().strftime("%A")
+        for entry in weekday_text:
+            if entry.startswith(today):
+                return entry.split(": ", 1)[-1]
+    except Exception:
+        pass
+    return ""
 
 
 # ── Restaurants ───────────────────────────────────────────────────────────────
 
 def add_restaurant(name, cuisine="", cuisine_category=None, address="", website="",
-                   yelp_id="", yelp_rating=0, yelp_review_count=0):
+                   yelp_id="", yelp_rating=0, yelp_review_count=0, opening_hours=None):
     if cuisine_category is None:
         cuisine_category = guess_category(cuisine)
     with get_conn() as conn:
@@ -197,19 +235,28 @@ def add_restaurant(name, cuisine="", cuisine_category=None, address="", website=
         if USE_PG:
             cur.execute(
                 """INSERT INTO restaurants (name, cuisine, cuisine_category, address, website,
-                   yelp_id, yelp_rating, yelp_review_count)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (name, cuisine, cuisine_category, address, website, yelp_id, yelp_rating, yelp_review_count)
+                   yelp_id, yelp_rating, yelp_review_count, opening_hours)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (name, cuisine, cuisine_category, address, website, yelp_id, yelp_rating, yelp_review_count, opening_hours)
             )
             return cur.fetchone()["id"]
         else:
             cur = conn.execute(
                 """INSERT INTO restaurants (name, cuisine, cuisine_category, address, website,
-                   yelp_id, yelp_rating, yelp_review_count)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (name, cuisine, cuisine_category, address, website, yelp_id, yelp_rating, yelp_review_count)
+                   yelp_id, yelp_rating, yelp_review_count, opening_hours)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (name, cuisine, cuisine_category, address, website, yelp_id, yelp_rating, yelp_review_count, opening_hours)
             )
             return cur.lastrowid
+
+
+def update_restaurant_hours(restaurant_id, opening_hours_json):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE restaurants SET opening_hours={PH} WHERE id={PH}",
+            (opening_hours_json, restaurant_id)
+        )
 
 
 def update_restaurant_yelp(restaurant_id, yelp_id, yelp_rating, yelp_review_count, website=""):
@@ -250,7 +297,11 @@ def compute_health_score(calorie_level, sodium_level, veggie_content, protein_ty
     score -= (calorie_level - 1) * 0.8
     score -= (sodium_level - 1) * 0.8
     score += (veggie_content - 1) * 0.4
-    protein_bonus = {"lean": 0.3, "plant": 0.5, "fatty": -0.3, "other": 0.0}
+    protein_bonus = {
+        "poultry": 0.2, "seafood": 0.4, "beef": 0.0, "pork": -0.1, "lamb": 0.0,
+        "plant": 0.5, "other": 0.0,
+        "lean": 0.3, "fatty": -0.3,  # legacy
+    }
     score += protein_bonus.get(protein_type, 0)
     if is_indulgent:
         score -= 1.0
@@ -315,6 +366,12 @@ def get_dishes(restaurant_id=None, active_only=True):
         return _rows(cur.fetchall())
 
 
+def update_dish_protein_type(dish_id, protein_type):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE dishes SET protein_type={PH} WHERE id={PH}", (protein_type, dish_id))
+
+
 def deactivate_dish(dish_id):
     with get_conn() as conn:
         cur = conn.cursor()
@@ -372,6 +429,39 @@ def get_recently_eaten_dish_ids(days=7):
                 (f"-{days} days",)
             )
         return {r["dish_id"] for r in _rows(cur.fetchall())}
+
+
+def get_history_by_date(date_str: str):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT h.*, d.name as dish_name, d.is_indulgent, r.name as restaurant_name
+               FROM eat_history h
+               JOIN dishes d ON h.dish_id=d.id
+               JOIN restaurants r ON d.restaurant_id=r.id
+               WHERE h.eaten_date = %s
+               ORDER BY h.id DESC""" if USE_PG else
+            """SELECT h.*, d.name as dish_name, d.is_indulgent, r.name as restaurant_name
+               FROM eat_history h
+               JOIN dishes d ON h.dish_id=d.id
+               JOIN restaurants r ON d.restaurant_id=r.id
+               WHERE h.eaten_date = ?
+               ORDER BY h.id DESC""",
+            (date_str,)
+        )
+        return _rows(cur.fetchall())
+
+
+def delete_meal(meal_id: int):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM eat_history WHERE id={PH}", (meal_id,))
+
+
+def delete_meals_by_date(date_str: str):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM eat_history WHERE eaten_date={PH}", (date_str,))
 
 
 def get_recent_indulgence_score(days=5):

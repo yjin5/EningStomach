@@ -22,8 +22,12 @@ Use these guidelines (AHA / USDA standards):
 - calorie_level: 1=low(<400kcal), 2=medium(400-700kcal), 3=high(>700kcal)
 - sodium_level: 1=low(<300mg), 2=medium(300-600mg), 3=high(>600mg per serving)
 - veggie_content: 1=none/minimal, 2=some vegetables, 3=vegetable-dominant
-- protein_type: "lean"(chicken breast/fish/shrimp), "plant"(tofu/beans/tempeh),
-                "fatty"(pork belly/fried/red meat), "other"(pasta/rice/dessert)
+- protein_type: "poultry"(chicken/duck/turkey dishes where poultry IS the main ingredient),
+                "seafood"(fish/shrimp/crab/lobster/clam),
+                "beef"(steak/ground beef/brisket), "pork"(pork belly/ribs/ham/sausage/egg rolls),
+                "lamb"(lamb chop/mutton), "plant"(tofu/beans/tempeh/veggie),
+                "other"(pasta/rice/noodles/dessert/soup/mixed/unclear — use this when protein is secondary or mixed)
+                NOTE: egg rolls, spring rolls, dumplings → "pork" or "other" (NOT poultry). Only use "poultry" when chicken/duck/turkey is clearly the star ingredient.
 - is_indulgent: true for deep-fried, very heavy, desserts, or high-fat dishes
 
 If the menu has both Chinese and English names for a dish, include both in the "name" field, e.g. "宫保鸡丁 Kung Pao Chicken". If only Chinese, keep Chinese. If only English, keep English.

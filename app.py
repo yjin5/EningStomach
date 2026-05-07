@@ -1,11 +1,12 @@
 import streamlit as st
 from database import (
     init_db, add_restaurant, get_restaurants, get_restaurant,
-    add_dish, add_dishes_bulk, get_dishes, deactivate_dish,
-    log_meal, get_history, get_recent_indulgence_score,
-    update_restaurant_yelp, CUISINE_CATEGORIES,
+    add_dish, add_dishes_bulk, get_dishes, deactivate_dish, update_dish_protein_type,
+    log_meal, get_history, get_history_by_date, delete_meal, delete_meals_by_date,
+    get_recent_indulgence_score, update_restaurant_yelp, update_restaurant_hours,
+    today_hours, CUISINE_CATEGORIES,
 )
-from recommender import recommend, diet_status_message
+from recommender import recommend, diet_status_message, exercise_hint, calorie_estimate, single_exercise_hint, total_exercise_summary
 from reviews import enrich_restaurant
 from config import GOOGLE_PLACES_API_KEY
 
@@ -56,11 +57,27 @@ if page == "今天的推荐":
             options=["spicy", "salty", "greasy", "oily", "heavy", "sweet", "rich"],
         )
 
-    max_price = st.slider("最高价格 ($)", 0, 60, 30)
+    max_price = st.slider("最高价格 ($)", 0, 100, 30)
     prefer_healthy = st.checkbox("今天想吃健康一点", value=(indulgence >= 0.4))
+    _MEAT_OPTIONS = {
+        "poultry": "禽类（鸡/鸭）",
+        "seafood": "海鲜（鱼/虾/蟹）",
+        "beef":    "牛肉",
+        "pork":    "猪肉",
+        "lamb":    "羊肉",
+    }
+    required_meats = st.multiselect(
+        "今天想吃哪种荤菜？（每选一种，推荐里至少出现一道）",
+        options=list(_MEAT_OPTIONS.keys()),
+        format_func=lambda x: _MEAT_OPTIONS[x],
+        placeholder="不选 = 不限",
+    )
 
     if st.button("给我推荐！", type="primary", use_container_width=True):
         exclude_ids = [rest_names[n] for n in exclude_rests]
+
+        # Track shown dishes across consecutive clicks to force variety
+        shown = st.session_state.get("shown_dish_ids", set())
         results = recommend(
             cuisine_categories=selected_cats if selected_cats else None,
             exclude_restaurant_ids=exclude_ids,
@@ -68,11 +85,29 @@ if page == "今天的推荐":
             max_price=max_price if max_price > 0 else None,
             prefer_healthy=prefer_healthy,
             top_n=3,
+            required_protein_types=required_meats if required_meats else None,
+            exclude_shown_ids=shown,
         )
+        # If pool exhausted with exclusions, reset and try again without
+        if not results:
+            shown = set()
+            st.session_state["shown_dish_ids"] = set()
+            results = recommend(
+                cuisine_categories=selected_cats if selected_cats else None,
+                exclude_restaurant_ids=exclude_ids,
+                exclude_keywords=exclude_kws,
+                max_price=max_price if max_price > 0 else None,
+                prefer_healthy=prefer_healthy,
+                top_n=3,
+                required_protein_types=required_meats if required_meats else None,
+            )
 
         if not results:
             st.warning("没找到符合条件的菜，放宽一下筛选条件试试。")
         else:
+            # Add these results to shown set for next click
+            st.session_state["shown_dish_ids"] = shown | {d["id"] for d in results}
+
             st.subheader("推荐结果")
             for i, d in enumerate(results):
                 with st.container(border=True):
@@ -84,6 +119,7 @@ if page == "今天的推荐":
                         health_bar = "🟢" * int(d['health_score']) + "⚪" * (5 - int(d['health_score']))
                         rating_str = f"⭐ {d['yelp_rating']}" if d['yelp_rating'] else "暂无评分"
                         st.markdown(f"{price_str} · {health_bar} 健康分 {d['health_score']}/5 · {rating_str}")
+                        st.caption(exercise_hint(d.get("calorie_level", 2)))
                         if d.get("yelp_mentions"):
                             st.caption(f"评价关键词: {d['yelp_mentions']}")
                         if d.get("notes"):
@@ -93,6 +129,7 @@ if page == "今天的推荐":
                             st.link_button("去点餐", d["website"], use_container_width=True)
                         if st.button("就吃这个", key=f"pick_{i}", use_container_width=True):
                             log_meal(d["id"], indulgent=bool(d["is_indulgent"]))
+                            st.session_state["shown_dish_ids"] = set()  # reset on meal logged
                             st.success(f"已记录：{d['name']}，好好享用！")
                             st.balloons()
 
@@ -125,6 +162,8 @@ elif page == "添加餐厅":
             else:
                 st.warning("Google Maps 未找到该餐厅，已手动保存。")
 
+        import json as _json
+        hours_list = google_data.get("opening_hours")
         rid = add_restaurant(
             name=name,
             cuisine=cuisine or google_data.get("categories", ""),
@@ -134,6 +173,7 @@ elif page == "添加餐厅":
             yelp_id=google_data.get("place_id", ""),
             yelp_rating=google_data.get("google_rating", 0),
             yelp_review_count=google_data.get("google_review_count", 0),
+            opening_hours=_json.dumps(hours_list) if hours_list else None,
         )
         st.success(f"餐厅已添加（ID: {rid}），可以去添加菜品了。")
 
@@ -164,7 +204,7 @@ elif page == "导入菜单":
         google_query = st.text_input("餐厅名称", value=rest_name, key="gp_query")
 
         if st.button("下载照片", use_container_width=True, key="gp_fetch"):
-            from reviews import search_restaurant, get_place_photos
+            from reviews import search_restaurant, get_place_photos, is_menu_photo
             with st.spinner("搜索餐厅并下载照片…"):
                 info = search_restaurant(google_query)
             if not info:
@@ -174,20 +214,28 @@ elif page == "导入菜单":
                 if not photos:
                     st.error("没有找到照片。")
                 else:
+                    with st.spinner(f"自动识别 {len(photos)} 张照片中的菜单图…"):
+                        flags = [is_menu_photo(p) for p in photos]
                     st.session_state["gp_photos"] = photos
+                    st.session_state["gp_flags"] = flags
                     st.session_state["gp_info"] = info
 
         if "gp_photos" in st.session_state:
             photos = st.session_state["gp_photos"]
+            flags = st.session_state.get("gp_flags", [False] * len(photos))
             info = st.session_state["gp_info"]
-            st.success(f"下载了 {len(photos)} 张照片，勾选菜单图：")
+            menu_count = sum(flags)
+            st.success(
+                f"下载了 {len(photos)} 张照片，自动识别到 {menu_count} 张菜单图（已预选）。可手动调整："
+            )
 
             selected = []
             cols = st.columns(3)
             for i, photo_bytes in enumerate(photos):
                 with cols[i % 3]:
-                    st.image(photo_bytes, use_container_width=True)
-                    if st.checkbox(f"菜单图 #{i+1}", key=f"gp_sel_{i}"):
+                    label = "菜单" if flags[i] else "非菜单"
+                    st.image(photo_bytes, use_container_width=True, caption=label)
+                    if st.checkbox(f"选 #{i+1}", key=f"gp_sel_{i}", value=flags[i]):
                         selected.append(photo_bytes)
 
             if selected and st.button(
@@ -202,6 +250,7 @@ elif page == "导入菜单":
                         st.session_state["parsed_rest_name"] = rest_name
                         del st.session_state["gp_photos"]
                         del st.session_state["gp_info"]
+                        st.session_state.pop("gp_flags", None)
                         st.rerun()
                     except Exception as e:
                         st.error(f"识别失败：{e}")
@@ -302,9 +351,14 @@ elif page == "导入菜单":
                     veggie_content = st.select_slider("蔬菜", [1,2,3],
                         format_func=lambda x: {1:"少",2:"有",3:"主"}[x],
                         value=int(d.get("veggie_content",1)), key=f"veg_{i}")
-                    protein_type = st.selectbox("蛋白质", ["lean","plant","fatty","other"],
-                        format_func=lambda x: {"lean":"瘦肉","plant":"植物","fatty":"肥肉","other":"其他"}[x],
-                        index=["lean","plant","fatty","other"].index(d.get("protein_type","other")),
+                    _PTYPES = ["poultry","seafood","beef","pork","lamb","plant","other"]
+                    _PNAMES = {"poultry":"禽类","seafood":"海鲜","beef":"牛肉","pork":"猪肉","lamb":"羊肉","plant":"植物蛋白","other":"其他"}
+                    _pt_val = d.get("protein_type","other")
+                    if _pt_val not in _PTYPES:
+                        _pt_val = "other"
+                    protein_type = st.selectbox("蛋白质", _PTYPES,
+                        format_func=lambda x: _PNAMES[x],
+                        index=_PTYPES.index(_pt_val),
                         key=f"prot_{i}")
                     is_indulgent = st.checkbox("放纵餐", value=bool(d.get("is_indulgent",False)), key=f"ind_{i}")
                     notes = st.text_input("备注", value=d.get("notes",""), key=f"notes_{i}")
@@ -360,10 +414,15 @@ elif page == "添加菜品":
             )
             protein_type = st.selectbox(
                 "蛋白质类型",
-                options=["lean", "plant", "fatty", "other"],
+                options=["poultry", "seafood", "beef", "pork", "lamb", "plant", "other"],
                 format_func=lambda x: {
-                    "lean": "瘦肉/鸡胸", "plant": "植物蛋白",
-                    "fatty": "肥肉/油炸", "other": "其他/无"
+                    "poultry": "禽类（鸡/鸭/火鸡）",
+                    "seafood": "海鲜（鱼/虾/蟹/贝）",
+                    "beef":    "牛肉",
+                    "pork":    "猪肉",
+                    "lamb":    "羊肉",
+                    "plant":   "植物蛋白（豆腐/豆类）",
+                    "other":   "其他（米/面/甜点）",
                 }[x],
             )
         is_indulgent = st.checkbox("这是一道放纵餐（油腻/高热/垃圾食品）")
@@ -408,6 +467,31 @@ elif page == "饮食记录":
     indulgence = get_recent_indulgence_score(days=5)
     st.metric("最近5天放纵餐比例", f"{indulgence*100:.0f}%")
 
+    st.divider()
+    st.subheader("删除某天的记录")
+    import datetime
+    del_date = st.date_input("选择日期", value=datetime.date.today(), key="del_date")
+    del_date_str = str(del_date)
+    day_records = get_history_by_date(del_date_str)
+    if not day_records:
+        st.caption(f"{del_date_str} 没有记录。")
+    else:
+        st.caption(f"{del_date_str} 共 {len(day_records)} 条记录：")
+        for h in day_records:
+            indulgent_tag = "放纵餐" if h["indulgent"] else "健康餐"
+            col_text, col_btn = st.columns([5, 1])
+            with col_text:
+                st.markdown(f"{h['restaurant_name']} · {h['dish_name']} · {indulgent_tag}")
+            with col_btn:
+                if st.button("删除", key=f"delmeal_{h['id']}"):
+                    delete_meal(h["id"])
+                    st.rerun()
+        st.divider()
+        if st.button(f"删除 {del_date_str} 全部记录", type="primary", use_container_width=True):
+            delete_meals_by_date(del_date_str)
+            st.success(f"已删除 {del_date_str} 的所有记录。")
+            st.rerun()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE: 管理菜单
 # ─────────────────────────────────────────────────────────────────────────────
@@ -420,14 +504,24 @@ elif page == "管理菜单":
 
     rest_filter = st.selectbox("选择餐厅查看菜品", [r["name"] for r in restaurants])
     rid = next(r["id"] for r in restaurants if r["name"] == rest_filter)
+    rest_row = next(r for r in restaurants if r["name"] == rest_filter)
+    hours_str = today_hours(rest_row.get("opening_hours"))
+    if hours_str:
+        if "Closed" in hours_str:
+            st.warning(f"今天休息（{hours_str}）")
+        else:
+            st.caption(f"今日营业时间：{hours_str}")
 
     if GOOGLE_PLACES_API_KEY and st.button("刷新 Google 评分"):
         r = get_restaurant(rid)
         with st.spinner("查询 Google Maps…"):
             data = enrich_restaurant(r["name"], r["address"] or "")
         if data:
+            import json as _json
             update_restaurant_yelp(rid, data["place_id"], data["google_rating"],
                                    data["google_review_count"], data.get("website", ""))
+            if data.get("opening_hours"):
+                update_restaurant_hours(rid, _json.dumps(data["opening_hours"]))
             st.success(f"已更新：⭐{data['google_rating']} ({data['google_review_count']}条评价)")
         else:
             st.warning("Google Maps 未找到。")
@@ -436,7 +530,19 @@ elif page == "管理菜单":
     if not dishes:
         st.info("这家店还没有菜品。")
     else:
-        st.caption("勾选想点的菜，最后生成订单；或直接去推荐页让系统帮你选。")
+        col_caption, col_clear = st.columns([4, 1])
+        with col_caption:
+            st.caption("勾选想点的菜，最后生成订单；或直接去推荐页让系统帮你选。")
+        with col_clear:
+            if st.button("取消全选", key="clear_all"):
+                for d in dishes:
+                    st.session_state[f"sel_{d['id']}"] = False
+                st.rerun()
+        _PT_OPTS = ["poultry","seafood","beef","pork","lamb","plant","other","lean","fatty"]
+        _PT_LABELS = {
+            "poultry":"禽类","seafood":"海鲜","beef":"牛肉","pork":"猪肉","lamb":"羊肉",
+            "plant":"植物","other":"其他","lean":"瘦肉(旧)","fatty":"肥肉(旧)",
+        }
         selected_dish_ids = []
         for d in dishes:
             health_bar = "🟢" * int(d['health_score']) + "⚪" * (5 - int(d['health_score']))
@@ -447,7 +553,24 @@ elif page == "管理菜单":
                 if checked:
                     selected_dish_ids.append(d["id"])
             with col_info:
+                kcal = calorie_estimate(d.get("calorie_level", 2))
+                ex_name, ex_mins = single_exercise_hint(d.get("calorie_level", 2))
                 st.markdown(f"**{d['name']}** · {price_str} · {health_bar}")
+                cur_pt = d.get("protein_type", "other")
+                if cur_pt not in _PT_OPTS:
+                    cur_pt = "other"
+                new_pt = st.selectbox(
+                    "蛋白质",
+                    options=_PT_OPTS,
+                    format_func=lambda x: _PT_LABELS[x],
+                    index=_PT_OPTS.index(cur_pt),
+                    key=f"pt_{d['id']}",
+                    label_visibility="collapsed",
+                )
+                if new_pt != cur_pt:
+                    update_dish_protein_type(d["id"], new_pt)
+                    st.rerun()
+                st.caption(f"约 {kcal} 千卡 · {ex_name} {ex_mins} 分钟可消耗")
             with col_btn:
                 if st.button("下架", key=f"del_{d['id']}"):
                     deactivate_dish(d["id"])
@@ -466,6 +589,8 @@ elif page == "管理菜单":
                     total += d['price']
             if total:
                 st.markdown(f"**合计：${total:.2f}**")
+            total_kcal = sum(calorie_estimate(d.get("calorie_level", 2)) for d in selected_dishes)
+            st.info(total_exercise_summary(total_kcal))
             rest = get_restaurant(rid)
             if rest and rest["website"]:
                 st.link_button("去餐厅官网点餐", rest["website"], use_container_width=True)
