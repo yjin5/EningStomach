@@ -140,28 +140,28 @@ def recommend(
 
 
 _EXERCISES = [
-    ("慢跑", 9),
-    ("快走", 5),
-    ("游泳", 11),
-    ("骑自行车", 8),
-    ("跳绳", 12),
-    ("跳舞", 6),
-    ("爬楼梯", 10),
-    ("瑜伽", 3),
-    ("有氧操", 7),
-    ("篮球", 8),
-    ("足球", 9),
-    ("乒乓球", 5),
-    ("羽毛球", 7),
-    ("网球", 8),
-    ("拳击", 11),
-    ("划船机", 10),
-    ("跑步机", 10),
-    ("卧推", 4),
-    ("深蹲", 5),
-    ("椭圆机", 8),
-    ("壶铃训练", 12),
-    ("普拉提", 4),
+    ("慢跑",   "Jogging",        9),
+    ("快走",   "Brisk walk",     5),
+    ("游泳",   "Swimming",      11),
+    ("骑自行车","Cycling",        8),
+    ("跳绳",   "Jump rope",     12),
+    ("跳舞",   "Dancing",        6),
+    ("爬楼梯", "Stair climbing",10),
+    ("瑜伽",   "Yoga",           3),
+    ("有氧操", "Aerobics",       7),
+    ("篮球",   "Basketball",     8),
+    ("足球",   "Soccer",         9),
+    ("乒乓球", "Ping pong",      5),
+    ("羽毛球", "Badminton",      7),
+    ("网球",   "Tennis",         8),
+    ("拳击",   "Boxing",        11),
+    ("划船机", "Rowing machine",10),
+    ("跑步机", "Treadmill",     10),
+    ("卧推",   "Bench press",    4),
+    ("深蹲",   "Squats",         5),
+    ("椭圆机", "Elliptical",     8),
+    ("壶铃训练","Kettlebell",    12),
+    ("普拉提", "Pilates",        4),
 ]
 
 _CALORIE_ESTIMATE = {0: 100, 1: 300, 2: 550, 3: 800}
@@ -170,51 +170,70 @@ _CUTE_TEMPLATES = [
     "吃完记得动一动哦～ 相当于{ex1}约 {t1} 分钟，或者{ex2}约 {t2} 分钟呢！",
     "这顿吃下去，要{ex1} {t1} 分钟才能消耗掉，也可以换成{ex2} {t2} 分钟～加油！",
     "热量小提示：需要{ex1}约 {t1} 分钟，或{ex2} {t2} 分钟来抵消，运动起来吧！",
-    "想消耗这顿饭？{ex1} {t1} 分钟或{ex2} {t2} 分钟{ex2}都行，你选哪个？",
+    "想消耗这顿饭？{ex1} {t1} 分钟或{ex2} {t2} 分钟都行，你选哪个？",
+]
+
+_CUTE_TEMPLATES_EN = [
+    "Remember to move! That's ~{ex1} for {t1} min, or {ex2} for {t2} min.",
+    "Burn it off: {ex1} {t1} min, or swap for {ex2} {t2} min — your call!",
+    "Calorie tip: {ex1} ~{t1} min or {ex2} ~{t2} min to offset this meal.",
+    "Work it off with {ex1} {t1} min or {ex2} {t2} min. You got this!",
 ]
 
 
-def exercise_hint(calorie_level: int) -> str:
+def exercise_hint(calorie_level: int, lang: str = "zh") -> str:
     kcal = _CALORIE_ESTIMATE.get(calorie_level, 550)
     picks = random.sample(_EXERCISES, 2)
-    ex1, rate1 = picks[0]
-    ex2, rate2 = picks[1]
+    zh1, en1, rate1 = picks[0]
+    zh2, en2, rate2 = picks[1]
+    ex1 = en1 if lang == "en" else zh1
+    ex2 = en2 if lang == "en" else zh2
     t1 = round(kcal / rate1)
     t2 = round(kcal / rate2)
-    template = random.choice(_CUTE_TEMPLATES)
-    return template.format(ex1=ex1, t1=t1, ex2=ex2, t2=t2)
+    templates = _CUTE_TEMPLATES_EN if lang == "en" else _CUTE_TEMPLATES
+    return random.choice(templates).format(ex1=ex1, t1=t1, ex2=ex2, t2=t2)
 
 
 def calorie_estimate(calorie_level: int) -> int:
     return _CALORIE_ESTIMATE.get(calorie_level, 550)
 
 
-def single_exercise_hint(calorie_level: int):
+def single_exercise_hint(calorie_level: int, lang: str = "zh"):
     """Returns (exercise_name, minutes) for one random exercise."""
     kcal = _CALORIE_ESTIMATE.get(calorie_level, 550)
-    ex_name, rate = random.choice(_EXERCISES)
-    return ex_name, round(kcal / rate)
+    zh_name, en_name, rate = random.choice(_EXERCISES)
+    name = en_name if lang == "en" else zh_name
+    return name, round(kcal / rate)
 
 
-def total_exercise_summary(total_kcal: int) -> str:
+def total_exercise_summary(total_kcal: int, lang: str = "zh") -> str:
     n = random.randint(2, len(_EXERCISES))
     picks = random.sample(_EXERCISES, n)
     display = picks[:3] if n >= 3 else picks
     splits = sorted([random.random() for _ in range(len(display) - 1)] + [0.0, 1.0])
     fracs = [splits[i+1] - splits[i] for i in range(len(display))]
     parts = []
-    for (name, rate), frac in zip(display, fracs):
+    for (zh_name, en_name, rate), frac in zip(display, fracs):
+        name = en_name if lang == "en" else zh_name
+        unit = "min" if lang == "en" else "分钟"
         mins = round(total_kcal * frac / rate)
         if mins > 0:
-            parts.append(f"{name} {mins} 分钟")
+            parts.append(f"{name} {mins} {unit}")
     combo = " + ".join(parts)
+    if lang == "en":
+        return f"This meal is ~**{total_kcal} kcal**. Burn it with: {combo} — just enough to offset it!"
     return f"这顿合计约 **{total_kcal} 千卡**，运动组合消耗方案：{combo}，合起来刚好抵消这顿饭～加油！"
 
 
-def diet_status_message(indulgence_score: float) -> str:
+def diet_status_message(indulgence_score: float, lang: str = "zh") -> str:
+    if lang == "en":
+        if indulgence_score >= 0.6:
+            return "You've been eating heavy lately. Consider something lighter today."
+        elif indulgence_score >= 0.3:
+            return "Your diet has been balanced lately. No restrictions today."
+        return "You've been eating healthy lately. Feel free to indulge a little."
     if indulgence_score >= 0.6:
         return "最近吃得比较油腻，今天建议清淡一些。"
     elif indulgence_score >= 0.3:
         return "最近饮食均衡，今天随意。"
-    else:
-        return "最近吃得很健康，今天可以放松一下。"
+    return "最近吃得很健康，今天可以放松一下。"
