@@ -115,7 +115,21 @@ if _page_key == "recommend":
         else:
             st.session_state["shown_dish_ids"] = shown | {d["id"] for d in results}
 
+            # Warn if any required meat type is missing from results
+            if required_meats:
+                satisfied = {d.get("protein_type") for d in results}
+                missing = [m for m in required_meats if m not in satisfied]
+                if missing:
+                    missing_names = "、".join(_MEAT_OPTIONS[m] for m in missing) if _lang == "zh" else "/".join(_MEAT_OPTIONS[m] for m in missing)
+                    st.warning(t("meat_missing", _lang, types=missing_names))
+
             st.subheader(t("results_header", _lang))
+            _ALL_PTYPES = {
+                "poultry": t("poultry", _lang), "seafood": t("seafood", _lang),
+                "beef": t("beef", _lang), "pork": t("pork", _lang),
+                "lamb": t("lamb", _lang), "plant": t("plant", _lang),
+                "other": t("other", _lang),
+            }
             for i, d in enumerate(results):
                 with st.container(border=True):
                     col_a, col_b = st.columns([3, 1])
@@ -125,7 +139,8 @@ if _page_key == "recommend":
                         price_str = f"${d['price']:.2f}" if d['price'] else t("price_unknown", _lang)
                         health_bar = "🟢" * int(d['health_score']) + "⚪" * (5 - int(d['health_score']))
                         rating_str = f"⭐ {d['yelp_rating']}" if d['yelp_rating'] else t("no_rating", _lang)
-                        st.markdown(f"{price_str} · {health_bar} {t('health_label', _lang)} {d['health_score']}/5 · {rating_str}")
+                        ptype_label = _ALL_PTYPES.get(d.get("protein_type", "other"), t("other", _lang))
+                        st.markdown(f"{price_str} · {health_bar} {t('health_label', _lang)} {d['health_score']}/5 · {rating_str} · {ptype_label}")
                         st.caption(exercise_hint(d.get("calorie_level", 2), _lang))
                         if d.get("yelp_mentions"):
                             st.caption(f"{t('review_kw', _lang)}: {d['yelp_mentions']}")

@@ -165,6 +165,7 @@ T = {
         # Rating + favorites
         "min_rating":       "最低评分（0 = 不限）",
         "favorites_first":  "优先推荐收藏菜",
+        "meat_missing":     "未找到「{types}」菜品 — 可能近期已吃过（7天冷却），或在管理菜单调整蛋白质分类。",
         # Sidebar
         "api_ok":           "Google Maps API: 已连接",
         "api_missing":      "Google Maps API: 未配置\n在 .env 填入 GOOGLE_PLACES_API_KEY",
@@ -326,6 +327,7 @@ T = {
         # Rating + favorites
         "min_rating":       "Min rating (0 = any)",
         "favorites_first":  "Boost favorites",
+        "meat_missing":     "No \"{types}\" dishes found — eaten recently (7-day cooldown) or check protein type in Manage Menu.",
         "api_ok":           "Google Maps API: Connected",
         "api_missing":      "Google Maps API: Not configured\nAdd GOOGLE_PLACES_API_KEY to .env",
     },
